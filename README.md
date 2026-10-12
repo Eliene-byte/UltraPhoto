@@ -4,9 +4,9 @@ A high-performance raster image editor in Rust. Same commands, same muscle
 memory as Photoshop — built GPU-first, tiled so it stays light, and compiled in
 CI so everyone gets the same binary.
 
-> **Status.** Six crates, 75 passing tests, CI green on Linux/Windows/macOS.
-> The GPU compositor and the UI toolkit are written but not yet wired to a
-> window — see [Roadmap](#roadmap).
+> **Status.** Six crates, 93 passing tests, CI green on Linux/Windows/macOS.
+> The GPU compositor is verified against its CPU reference. The window layer
+> and the tool set are next — see [Roadmap](#roadmap).
 
 ---
 
@@ -102,6 +102,25 @@ silently drift.
 - `LayerGpu` — upload/download by dirty rect only.
 - `Compositor` — one compute pass per layer over the dirty rect, accumulating
   in place (no ping-pong).
+
+**Verified against the CPU.** A parity test composites the same pixels with
+the WGSL kernel and with `ultrablend`, for all 27 blend modes plus every
+opacity step, and fails if they diverge. That test earned its keep
+immediately: it caught a bug where Hue took the *backdrop's* hue instead of the
+source's — the CPU "reference" was wrong and the GPU was right, which is
+precisely the failure mode a cross-check exists to find.
+
+Three GPU-specific bugs the tests caught, worth naming because none of them
+produce errors:
+
+1. **Rect uploads wrote `w * h` contiguous floats.** The GPU layout is
+   row-major with a stride of `width`, so a rect inside a wider plane is not
+   contiguous. The tail of every row was smeared into the next one.
+2. **The bind-group cache keyed on buffer *size*.** Every layer of a canvas
+   has the same size, so the cache handed one layer's bind group to another.
+3. **`workgroups_for` was used for a 2D dispatch.** With
+   `workgroup_size(64)`, a `(gw, gh)` grid covers `(64*gw, gh)` pixels, not
+   `(w, h)` — most of the rect was never touched.
 
 ---
 
