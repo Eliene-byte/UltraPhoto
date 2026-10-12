@@ -4,8 +4,9 @@ A high-performance raster image editor in Rust. Same commands, same muscle
 memory as Photoshop — built GPU-first, tiled so it stays light, and compiled in
 CI so everyone gets the same binary.
 
-> **Status: foundational crates.** See [Roadmap](#roadmap) for what exists
-> today. Everything in this repo is tested; nothing is a stub.
+> **Status.** Six crates, 75 passing tests, CI green on Linux/Windows/macOS.
+> The GPU compositor and the UI toolkit are written but not yet wired to a
+> window — see [Roadmap](#roadmap).
 
 ---
 
@@ -13,16 +14,25 @@ CI so everyone gets the same binary.
 
 | Concern | Photoshop | UltraPhoto approach |
 |---|---|---|
-| Filtering / compositing | CPU, one thread per row | **WGSL compute shaders** on the GPU, with AVX2/AVX-512 SIMD fallback for kernels that need it |
-| Memory for a large canvas | Allocates the full canvas per layer | **Lazily allocated 256×256 tiles** — a 60000×40000 canvas you scribbled on costs kilobytes |
+| Filtering / compositing | CPU, one thread per row | **WGSL compute shaders** on the GPU, with SIMD CPU fallback |
+| Memory for a large canvas | Allocates the full canvas per layer | **Lazily allocated 256×256 tiles** — a huge canvas you scribbled on costs kilobytes |
 | Undo | Full-state history states | **Tile diffs** — a brush dab stores ~512 KiB, not the whole image |
-| Colour | sRGB only in practice | 8/16/32-bit documents, linear-light 32-bit working space, Lab, CMYK, spot channels |
-| Startup | ~10 s, ~2 GB | Target < 1 s, < 150 MB (measured, not estimated — CI tracks it) |
+| Channels | RGB + alpha, some CMYK | **Any channel count**, stored planar, handled by one uniform kernel |
+| Colour | sRGB in practice | 8/16/32-bit documents, 32-bit linear working space, Lab, CMYK, spot channels |
+| Startup | ~10 s, ~2 GB | Target < 1 s, < 150 MB (tracked by CI, not estimated) |
 
-The key structural decision: **pixels are stored planar, one plane per channel,
-tiled**. That maps one-to-one onto GPU textures, removes the de-interleaving
-pass that dominates naive editors, and makes per-channel operations (hue, a
-channel merge, a mask) free.
+Three structural decisions carry most of that weight:
+
+**Pixels are planar and tiled.** One plane per channel, cut into 256×256 tiles
+that materialise on first write. A 60000×40000 canvas where you painted one
+corner costs kilobytes instead of 9.6 GB.
+
+**Layers live in storage buffers, not textures.** A document can have six
+channels (CMYK + alpha + under-colour removal) and storage textures top out at
+four. A single channel-major `array<f32>` handles every layout with one kernel.
+
+**Every API speaks normalised `f32`.** Quantisation to 8/16/32-bit happens in
+exactly one place, so no kernel ever has to know the document's bit depth.
 
 ---
 
@@ -33,81 +43,85 @@ ultrapixel      core storage: tiled planes, bit depths, colour spaces
 ultrablend      all 27 Photoshop blend modes (CPU reference impl)
 ultradoc        document, layer tree, tile-diff history
 ultraformat     PNG/JPEG/TIFF/WebP I/O with fidelity guarantees
-ultragpu        wgpu device, compute pipelines, WGSL kernels   [next]
-ultrapixel-simd AVX2/AVX-512 kernels                           [next]
-ultraui         custom wgpu UI toolkit — pixel-exact PS theme  [next]
-ultrapaint      the application binary                          [next]
+ultraui         UI toolkit: Photoshop's exact theme, docking, shortcuts
+ultragpu        wgpu device, layer streaming, WGSL compositor
 ```
 
 Dependency rule: **crates never depend downward**. `ultrapixel` knows nothing
-about layers; `ultradoc` knows nothing about the GPU; `ultrapaint` wires it
-together. That is what keeps the core testable without a display.
+about layers; `ultradoc` knows nothing about the GPU. That is what keeps the
+core testable without a display — and it is why CI can verify this project at
+all.
 
 ### `ultrapixel` — storage
 
-- `Plane` — a single channel, cut into 256×256 tiles that materialise on first
-  write and are freed on demand. Every read/write API is **normalised `0..1
-  f32`** so quantisation to 8/16/32-bit happens in exactly one place.
-- `Surface` — the planes of one layer, plus content bounds that let the
-  compositor skip empty regions and shrink GPU dispatches.
-- `Depth` — 8-bit / 16-bit / 32-bit float, per *document*, like Photoshop.
-- `Rect` — half-open integer rects; an empty rect is the universal "nothing to
-  do" signal, which keeps dirty-rect logic branch-free.
+- `Plane` — one channel, tiled, lazily allocated. Reads and writes are
+  normalised `0..1 f32`.
+- `Surface` — the planes of one layer plus content bounds, so the compositor
+  can skip empty regions.
+- `Depth` — 8/16/32-bit per *document*, like Photoshop.
+- `Rect` — half-open; an empty rect is the universal "nothing to do" signal.
 
 ### `ultrablend` — compositing math
 
-All 27 modes, separable and non-separable, plus opacity/fill separation exactly
-as Photoshop models it. This crate is the **reference**: the WGSL kernels must
-match it pixel-for-pixel and a cross-check test enforces that, so CPU and GPU
-can never silently drift.
+All 27 modes, separable and non-separable, with opacity and fill kept separate
+exactly as Photoshop models them. This is the **reference**: the WGSL kernels
+must match it and a cross-check test enforces it, so CPU and GPU can never
+silently drift.
 
 ### `ultradoc` — document & history
 
-- Layers are addressed by `LayerId`, never by index, so reordering the stack
-  mid-stroke can't retarget a tool's writes.
-- History entries store **tile diffs in both directions**. Writes to the same
-  tile coalesce, so a 500-dab stroke is one patch per tile, not 500.
-- The history budget is in **bytes, not step count** — a brush dab and
-  "flatten document" cost wildly different amounts, and a count-based limit
-  thrashes on both.
-- Layer add/delete/reorder records only the flat tree topology (a few dozen
-  bytes per layer), never pixels.
+- Layers addressed by `LayerId`, never index — reordering the stack mid-stroke
+  cannot retarget a tool's writes.
+- History stores **tile diffs in both directions**; writes to one tile coalesce,
+  so a 500-dab stroke is one patch per tile.
+- Budgeted in **bytes, not steps** — a brush dab and "flatten document" cost
+  different orders of magnitude.
+- Reorder/delete records only the tree topology, never pixels.
 
 ### `ultraformat` — file I/O
 
-- PNG, JPEG, TIFF, WebP — read and write.
-- **Detected by magic bytes, not extension.** A JPEG named `.png` is extremely
-  common and must not be mis-parsed.
-- **Depth is probed from the container** (PNG IHDR, TIFF tag 258). A 16-bit
-  TIFF does not get silently truncated to 8 bits on the way in.
-- Decoding converts **band by band** (64 rows) so the working set stays inside
-  L2 instead of materialising the full canvas three times.
-- JPEG has no alpha, so it is flattened against an explicit background rather
-  than against whatever happened to be in the buffer.
-- Sources without alpha are marked **fully opaque** on load — a JPEG must not
-  arrive as a transparent canvas.
+- PNG, JPEG, TIFF, WebP, read and write.
+- Detected by **magic bytes**, not extension.
+- Bit depth **probed from the container** — a 16-bit TIFF is not silently
+  truncated.
+- Decoding converts **band by band** (64 rows) to keep the working set in L2.
+- Sources without alpha arrive **fully opaque** rather than transparent.
+
+### `ultraui` — interface
+
+- `theme` — Photoshop's real dark-theme values as data, with the palette pinned
+  by tests so a "prettify" commit cannot silently change the look.
+- `layout` — dock/canvas/splitter geometry, hit testing, drop zones. Pure
+  arithmetic, no GPU, so "does the layout still work at 800×600" is a unit test.
+- `input` — key/edge state plus Photoshop's default shortcut map, using
+  Photoshop's own scripting names so recorded actions replay correctly.
+
+### `ultragpu` — compute
+
+- `GpuContext` — adapter selection with a software fallback.
+- `LayerGpu` — upload/download by dirty rect only.
+- `Compositor` — one compute pass per layer over the dirty rect, accumulating
+  in place (no ping-pong).
 
 ---
 
 ## Building
 
-Local builds do **not** need Visual Studio. Development uses the GNU toolchain:
+Local builds need **no Visual Studio**. Development uses the GNU toolchain:
 
 ```bash
 rustup toolchain install stable-x86_64-pc-windows-gnu
 rustup override set stable-x86_64-pc-windows-gnu
 cargo build
-cargo test
+cargo test --workspace
 ```
 
-CI builds with MSVC (the hosted Windows runners have the Visual Studio C++
-toolchain preinstalled) and is the shipping path.
+> Windows + GNU needs MinGW binutils on `PATH` for `dlltool`, which
+> `windows-sys` requires to build import libraries. Install
+> [WinLibs](https://winlibs.com/) once and add `mingw64\bin` to `PATH`.
 
-```bash
-cargo run --release          # run
-cargo test --workspace       # 36 tests
-cargo clippy --workspace --all-targets -- -D warnings
-```
+CI builds with MSVC — the hosted Windows runners already have the Visual Studio
+C++ toolchain — and is the shipping path.
 
 ### GitHub Actions
 
@@ -118,13 +132,12 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `lint` | `cargo fmt --check` + `clippy -D warnings` |
 | `test` | build + test on Linux, Windows and macOS |
 | `bench` | kernel benchmarks, to catch perf regressions |
-| `release` | tag/manual dispatch → optimised binaries as artifacts |
+| `release` | tag or manual dispatch → optimised binaries as artifacts |
 
-Pushing a tag `v*` or dispatching the workflow manually produces
-`ultrapaint-windows-x64`, `ultrapaint-macos-arm64` and `ultrapaint-linux-x64`.
+Pushing a tag `v*` produces `ultrapaint-windows-x64`, `ultrapaint-macos-arm64`
+and `ultrapaint-linux-x64`.
 
-The release profile is tuned hard: `lto = "fat"`, `codegen-units = 1`,
-`panic = "abort"`, `strip = true`.
+Release profile: `lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, `strip`.
 
 ---
 
@@ -136,17 +149,20 @@ The release profile is tuned hard: `lto = "fat"`, `codegen-units = 1`,
 - [x] Document, layer tree, groups, masks, clipping
 - [x] Tile-diff undo/redo with a byte budget
 - [x] File I/O: PNG / JPEG / TIFF / WebP, read and write
+- [x] Photoshop's dark theme as pinned, testable data
+- [x] Dock layout geometry, hit testing and drop zones
+- [x] Photoshop shortcut map with scripting-compatible names
+- [x] WGSL compositor with CPU↔GPU parity tests
 - [x] CI: fmt, clippy, tests on 3 OSes, release artifacts
-- [ ] **`ultragpu`** — wgpu device, layer↔texture streaming, composite pipeline
-- [ ] **`ultraui`** — custom UI toolkit: Photoshop's exact dark theme, dockable
-      panels, menu bar, options bar, tool presets
-- [ ] Compositor — groups, masks, clipping masks, adjustment layers
+- [ ] `ultrapaint` — window, menus, panels, canvas viewport, wiring it together
+- [ ] `ultraui` widgets — buttons, sliders, scrubby fields, menus, lists
 - [ ] Tools — move, marquee, lasso, magic wand, crop, brush, eraser, dodge,
       burn, blur/sharpen/smudge, type, pen
 - [ ] Selection ops — expand/contract, feather, inverse, transform
 - [ ] Filters — gaussian/box/motion blur, unsharp, liquify, neural upscale
+- [ ] Adjustment layers and group isolation in the compositor
 - [ ] PSD / PSB read-write
-- [ ] Actions / scripting layer (Photoshop-compatible command names)
+- [ ] Actions / scripting
 
 ---
 

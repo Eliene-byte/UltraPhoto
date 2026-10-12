@@ -1,0 +1,32 @@
+[package]
+name = "ultraui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Custom GPU UI toolkit for UltraPhoto, themed to match Photoshop."
+
+[dependencies]
+ultrapixel.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde = { workspace = true, features = ["derive"] }
+
+[dependencies.wgpu]
+workspace = true
+optional = true
+
+[dependencies.winit]
+workspace = true
+optional = true
+
+[features]
+default = []
+# The GPU renderer and the window backend are opt-in so the theme, layout and
+# geometry code stays testable headlessly — which is what CI actually runs.
+window = ["dep:winit", "dep:wgpu"]
+renderer = ["dep:wgpu"]
+
+[dev-dependencies]
+serde_json = "1"
