@@ -1,0 +1,11 @@
+/target
+**/*.rs.bk
+*.pdb
+*.ilk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.ultra
+*.ultra.tmp
+/screenshots/

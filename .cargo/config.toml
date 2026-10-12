@@ -1,0 +1,25 @@
+# UltraPhoto local build settings.
+#
+# NOTE: this file is used by local development AND by CI. CI builds on hosted
+# runners with `x86_64-pc-windows-msvc`, so anything target-specific here has to
+# be valid for *both* the GNU toolchain used on dev machines without Visual
+# Studio and the MSVC toolchain used on Windows CI.
+
+[build]
+rustflags = ["-C", "target-cpu=native"]
+
+[target.x86_64-unknown-linux-gnu]
+# The release binary ships a single .so-free executable, but the linker still
+# benefits from dropping unused sections (wgpu/winit pull in a lot).
+rustflags = [
+    "-C",
+    "target-cpu=native",
+    "-C",
+    "link-arg=-Wl,--gc-sections",
+]
+
+[alias]
+b = "build --release"
+r = "run --release"
+t = "test --workspace"
+tda = "test --workspace -- --include-ignored"

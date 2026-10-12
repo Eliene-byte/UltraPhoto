@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  # Keep the workspace on the registry's latest compatible versions rather
+  # than whatever stale lockfile a fork might have checked in.
+  CARGO_NET_RETRY: "10"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------- lint/clippy
+  lint:
+    name: fmt + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # --------------------------------------------------------------- build+test
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      # Linux needs the X11/Wayland dev headers for winit.
+      - name: Linux system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libx11-xcb-dev libxcb-shape0-dev libxcb-xfixes0-dev
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: test-${{ matrix.os }}
+
+      - name: Build (debug)
+        run: cargo build --workspace --all-targets
+
+      - name: Run tests
+        run: cargo test --workspace --all-targets
+
+  # -------------------------------------------------------------- perf guard
+  bench:
+    name: kernel benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal --component llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - name: Bench
+        run: cargo bench -p ultrapixel -p ultrablend
+
+  # --------------------------------------------------------- release binaries
+  release:
+    name: release (${{ matrix.target }})
+    needs: [lint, test]
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows: MSVC on the hosted runner (Visual Studio is preinstalled
+          # there). This is the shipping toolchain.
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: ultrapaint-windows-x64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: ultrapaint-macos-arm64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: ultrapaint-linux-x64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add ${{ matrix.target }}
+
+      - name: Linux system deps
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      # `panic = "abort"` + fat LTO + codegen-units=1 come from the workspace
+      # release profile; these flags just confirm we actually got them.
+      - name: Build release
+        run: cargo build --release --workspace --bin ultrapaint --target ${{ matrix.target }}
+
+      - name: Run tests (host)
+        run: cargo test --workspace --release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            target/${{ matrix.target }}/release/ultrapaint
+            target/${{ matrix.target }}/release/ultrapaint.exe
+            target/${{ matrix.target }}/release/*.dll
+          if-no-files-found: error
+          retention-days: 30

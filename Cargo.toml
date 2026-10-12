@@ -1,0 +1,73 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/ultrapixel",
+    "crates/ultrablend",
+    "crates/ultradoc",
+    "crates/ultraformat",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Eliene-byte/UltraPhoto"
+authors = ["UltraPhoto Contributors"]
+
+[workspace.dependencies]
+# --- internal ---
+ultrapixel = { path = "crates/ultrapixel" }
+ultrapixel-simd = { path = "crates/ultrapixel-simd" }
+ultrablend = { path = "crates/ultrablend" }
+ultragpu = { path = "crates/ultragpu" }
+ultradoc = { path = "crates/ultradoc" }
+ultraformat = { path = "crates/ultraformat" }
+ultraui = { path = "crates/ultraui" }
+
+# --- external ---
+bytemuck = { version = "1", features = ["derive"] }
+rayon = "1"
+smallvec = { version = "1", features = ["union"] }
+wide = "0.7"
+half = "2"
+serde = { version = "1", features = ["derive"] }
+rkyv = "0.8"
+anyhow = "1"
+thiserror = "2"
+log = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+winit = "0.30"
+wgpu = "25"
+raw-window-handle = "0.6"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tiff", "webp"] }
+exr = "1"
+zune-png = "0.2"
+zune-jpeg = "0.4"
+quick-xml = "0.37"
+kuchiki = "0.8"
+palette = "0.7"
+ordered-float = "4"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+incremental = false
+
+[profile.dev]
+opt-level = 1
+debug = 1
+incremental = true
+
+# Fast dev builds for the heavy inner loop (favors rebuild time over runtime).
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.bench]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

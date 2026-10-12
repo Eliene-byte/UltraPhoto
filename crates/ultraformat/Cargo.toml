@@ -1,0 +1,16 @@
+[package]
+name = "ultraformat"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Image file I/O for UltraPhoto: PNG, JPEG, TIFF, WebP, PSD and OpenEXR."
+
+[dependencies]
+ultrapixel.workspace = true
+ultrablend.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+image = { workspace = true }
+zune-png.workspace = true

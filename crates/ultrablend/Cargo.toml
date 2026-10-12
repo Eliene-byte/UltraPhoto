@@ -1,0 +1,11 @@
+[package]
+name = "ultrablend"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Photoshop-compatible blend modes for UltraPhoto. CPU reference implementation; the GPU kernels in ultragpu must match this exactly."
+
+[dependencies]
+ultrapixel.workspace = true
