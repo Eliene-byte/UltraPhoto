@@ -311,25 +311,32 @@ impl BlendMode {
                     (backdrop.r, backdrop.g, backdrop.b)
                 }
             }
+            // Hue: the source's hue, with the backdrop's saturation and lightness.
             BlendMode::Hue => {
-                let (_, s, l) = rgb_to_hsl(source.r, source.g, source.b);
-                let (h, _, _) = rgb_to_hsl(backdrop.r, backdrop.g, backdrop.b);
-                hsl_to_rgb(h, s, l)
+                let (sh, _, _) = rgb_to_hsl(source.r, source.g, source.b);
+                let (_, s, l) = rgb_to_hsl(backdrop.r, backdrop.g, backdrop.b);
+                hsl_to_rgb(sh, s, l)
             }
+            // Saturation: the source's saturation, with the backdrop's hue and
+            // lightness.
             BlendMode::Saturation => {
                 let (h, _, l) = rgb_to_hsl(backdrop.r, backdrop.g, backdrop.b);
-                let (_, s, _) = rgb_to_hsl(source.r, source.g, source.b);
-                hsl_to_rgb(h, s, l)
+                let (_, ss, _) = rgb_to_hsl(source.r, source.g, source.b);
+                hsl_to_rgb(h, ss, l)
             }
+            // Color: the source's hue and saturation, with the backdrop's
+            // lightness.
             BlendMode::Color => {
-                let (_, s, l) = rgb_to_hsl(source.r, source.g, source.b);
-                let (h, _, _) = rgb_to_hsl(backdrop.r, backdrop.g, backdrop.b);
-                hsl_to_rgb(h, s, l)
+                let (sh, ss, _) = rgb_to_hsl(source.r, source.g, source.b);
+                let (_, _, l) = rgb_to_hsl(backdrop.r, backdrop.g, backdrop.b);
+                hsl_to_rgb(sh, ss, l)
             }
+            // Luminosity: the source's lightness, with the backdrop's hue and
+            // saturation.
             BlendMode::Luminosity => {
                 let (h, s, _) = rgb_to_hsl(backdrop.r, backdrop.g, backdrop.b);
-                let (_, _, l) = rgb_to_hsl(source.r, source.g, source.b);
-                hsl_to_rgb(h, s, l)
+                let (_, _, sl) = rgb_to_hsl(source.r, source.g, source.b);
+                hsl_to_rgb(h, s, sl)
             }
             _ => (source.r, source.g, source.b),
         }
@@ -525,29 +532,88 @@ mod tests {
         }
     }
 
+    /// Distance between two hues on the [0,1) circle.
+    ///
+    /// Red is hue 0 *and* hue 1, so a naive `|a - b| < eps` reports a false
+    /// failure for any comparison that touches the seam.
+    fn hue_delta(a: f32, b: f32) -> f32 {
+        let d = (a - b).abs() % 1.0;
+        d.min(1.0 - d)
+    }
+
     #[test]
     fn hue_takes_source_hue_with_backdrop_luminosity() {
-        let backdrop = Rgba::new(0.2, 0.6, 0.2, 1.0); // green
-        let source = Rgba::new(0.6, 0.2, 0.2, 1.0); // red
+        let backdrop = Rgba::new(0.2, 0.6, 0.2, 1.0); // green, hue 1/3
+        let source = Rgba::new(0.6, 0.2, 0.2, 1.0); // red, hue 0/1
         let out = BlendMode::Hue.blend_pixel(backdrop, source);
         let bh = rgb_to_hsl(backdrop.r, backdrop.g, backdrop.b);
+        let sh = rgb_to_hsl(source.r, source.g, source.b);
         let oh = rgb_to_hsl(out.r, out.g, out.b);
-        assert!((bh.0 - oh.0).abs() < 1e-4, "hue must come from the source");
+        // Hue comes from the SOURCE, not the backdrop.
+        assert!(
+            hue_delta(sh.0, oh.0) < 1e-4,
+            "hue must come from the source, got {} vs {}",
+            oh.0,
+            sh.0
+        );
+        // Saturation and lightness come from the backdrop.
+        assert!(
+            (bh.1 - oh.1).abs() < 1e-4,
+            "saturation must come from backdrop, got {} vs {}",
+            oh.1,
+            bh.1
+        );
         assert!(
             (bh.2 - oh.2).abs() < 1e-4,
-            "lightness must come from backdrop"
+            "lightness must come from backdrop, got {} vs {}",
+            oh.2,
+            bh.2
         );
     }
 
     #[test]
-    fn luminance_takes_source_luminosity_with_backdrop_hue() {
+    fn luminosity_takes_source_luminosity_with_backdrop_hue() {
+        // Light backdrop, saturated source: the result must be the source's
+        // lightness on the backdrop's hue, which is a dark green here.
         let backdrop = Rgba::new(0.2, 0.6, 0.2, 1.0);
         let source = Rgba::new(0.9, 0.9, 0.9, 1.0);
         let out = BlendMode::Luminosity.blend_pixel(backdrop, source);
         let bh = rgb_to_hsl(backdrop.r, backdrop.g, backdrop.b);
         let oh = rgb_to_hsl(out.r, out.g, out.b);
-        assert!((bh.0 - oh.0).abs() < 1e-4, "hue must come from backdrop");
-        assert!(out.luma() > 0.6, "luminosity must come from source");
+        assert!(
+            (bh.0 - oh.0).abs() < 1e-4,
+            "hue must come from backdrop, got {} vs {}",
+            oh.0,
+            bh.0
+        );
+        assert!(out.luma() > 0.7, "luminosity must come from source");
+    }
+
+    #[test]
+    fn color_and_saturation_take_the_source_components_they_should() {
+        // Color: source hue + saturation, backdrop lightness.
+        let backdrop = Rgba::new(0.2, 0.2, 0.6, 1.0); // blue, dark
+        let source = Rgba::new(0.6, 0.6, 0.2, 1.0); // yellow, sat 0.5, light 0.4
+        let out = BlendMode::Color.blend_pixel(backdrop, source);
+        let sh = rgb_to_hsl(source.r, source.g, source.b);
+        let bh = rgb_to_hsl(backdrop.r, backdrop.g, backdrop.b);
+        let oh = rgb_to_hsl(out.r, out.g, out.b);
+        assert!((sh.0 - oh.0).abs() < 1e-4, "color: hue from source");
+        assert!((sh.1 - oh.1).abs() < 1e-4, "color: saturation from source");
+        assert!((bh.2 - oh.2).abs() < 1e-4, "color: lightness from backdrop");
+
+        // Saturation: source saturation, backdrop hue + lightness.
+        let out = BlendMode::Saturation.blend_pixel(backdrop, source);
+        let oh = rgb_to_hsl(out.r, out.g, out.b);
+        assert!((bh.0 - oh.0).abs() < 1e-4, "saturation: hue from backdrop");
+        assert!(
+            (sh.1 - oh.1).abs() < 1e-4,
+            "saturation: saturation from source"
+        );
+        assert!(
+            (bh.2 - oh.2).abs() < 1e-4,
+            "saturation: lightness from backdrop"
+        );
     }
 
     #[test]

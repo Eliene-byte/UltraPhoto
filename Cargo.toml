@@ -6,6 +6,7 @@ members = [
     "crates/ultradoc",
     "crates/ultraformat",
     "crates/ultraui",
+    "crates/ultragpu",
 ]
 
 [workspace.package]

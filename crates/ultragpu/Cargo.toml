@@ -1,0 +1,21 @@
+[package]
+name = "ultragpu"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "GPU device, texture streaming and the WGSL compositor for UltraPhoto."
+
+[dependencies]
+ultrapixel.workspace = true
+ultrablend.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+wgpu.workspace = true
+pollster = "0.4"
+bytemuck.workspace = true
+half.workspace = true
+
+[dev-dependencies]
+env_logger = "0.11"
