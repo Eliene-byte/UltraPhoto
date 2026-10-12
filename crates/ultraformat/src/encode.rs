@@ -115,12 +115,7 @@ fn to_rgba8(surface: &Surface, flatten: Option<[f32; 4]>) -> (Vec<u8>, usize, us
     let n = w * h;
     let channels = surface.channels();
 
-    let mut planes = [
-        vec![0f32; n],
-        vec![0f32; n],
-        vec![0f32; n],
-        vec![0f32; n],
-    ];
+    let mut planes = [vec![0f32; n], vec![0f32; n], vec![0f32; n], vec![0f32; n]];
     for (i, buf) in planes.iter_mut().enumerate().take(channels) {
         surface.plane(i).read_rect(full, buf);
     }
@@ -158,7 +153,11 @@ fn to_rgba8(surface: &Surface, flatten: Option<[f32; 4]>) -> (Vec<u8>, usize, us
     (out, w, h)
 }
 
-fn encode_png(surface: &Surface, icc: Option<&[u8]>, _opts: &SaveOptions) -> Result<Vec<u8>, SaveError> {
+fn encode_png(
+    surface: &Surface,
+    icc: Option<&[u8]>,
+    _opts: &SaveOptions,
+) -> Result<Vec<u8>, SaveError> {
     use image::codecs::png::{CompressionType, FilterType, PngEncoder};
 
     let (buf, w, h) = to_rgba8(surface, None);
@@ -194,7 +193,11 @@ fn encode_jpeg(surface: &Surface, opts: &SaveOptions) -> Result<Vec<u8>, SaveErr
     Ok(out)
 }
 
-fn encode_tiff(surface: &Surface, icc: Option<&[u8]>, _opts: &SaveOptions) -> Result<Vec<u8>, SaveError> {
+fn encode_tiff(
+    surface: &Surface,
+    icc: Option<&[u8]>,
+    _opts: &SaveOptions,
+) -> Result<Vec<u8>, SaveError> {
     let (buf, w, h) = to_rgba8(surface, None);
     let mut out = Vec::with_capacity(buf.len());
     // `TiffEncoder` requires `Seek`; a Cursor guarantees it without pinning

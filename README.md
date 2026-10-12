@@ -32,9 +32,9 @@ channel merge, a mask) free.
 ultrapixel      core storage: tiled planes, bit depths, colour spaces
 ultrablend      all 27 Photoshop blend modes (CPU reference impl)
 ultradoc        document, layer tree, tile-diff history
+ultraformat     PNG/JPEG/TIFF/WebP I/O with fidelity guarantees
 ultragpu        wgpu device, compute pipelines, WGSL kernels   [next]
 ultrapixel-simd AVX2/AVX-512 kernels                           [next]
-ultraformat     PNG/JPEG/TIFF/WebP/PSD/EXR I/O                 [next]
 ultraui         custom wgpu UI toolkit — pixel-exact PS theme  [next]
 ultrapaint      the application binary                          [next]
 ```
@@ -72,6 +72,20 @@ can never silently drift.
   thrashes on both.
 - Layer add/delete/reorder records only the flat tree topology (a few dozen
   bytes per layer), never pixels.
+
+### `ultraformat` — file I/O
+
+- PNG, JPEG, TIFF, WebP — read and write.
+- **Detected by magic bytes, not extension.** A JPEG named `.png` is extremely
+  common and must not be mis-parsed.
+- **Depth is probed from the container** (PNG IHDR, TIFF tag 258). A 16-bit
+  TIFF does not get silently truncated to 8 bits on the way in.
+- Decoding converts **band by band** (64 rows) so the working set stays inside
+  L2 instead of materialising the full canvas three times.
+- JPEG has no alpha, so it is flattened against an explicit background rather
+  than against whatever happened to be in the buffer.
+- Sources without alpha are marked **fully opaque** on load — a JPEG must not
+  arrive as a transparent canvas.
 
 ---
 
@@ -121,9 +135,9 @@ The release profile is tuned hard: `lto = "fat"`, `codegen-units = 1`,
 - [x] All 27 blend modes + opacity/fill compositing
 - [x] Document, layer tree, groups, masks, clipping
 - [x] Tile-diff undo/redo with a byte budget
+- [x] File I/O: PNG / JPEG / TIFF / WebP, read and write
 - [x] CI: fmt, clippy, tests on 3 OSes, release artifacts
 - [ ] **`ultragpu`** — wgpu device, layer↔texture streaming, composite pipeline
-- [ ] **`ultraformat`** — PNG/JPEG/TIFF/WebP/PSD read, PNG/JPEG/TIFF/PSD write
 - [ ] **`ultraui`** — custom UI toolkit: Photoshop's exact dark theme, dockable
       panels, menu bar, options bar, tool presets
 - [ ] Compositor — groups, masks, clipping masks, adjustment layers
@@ -131,6 +145,7 @@ The release profile is tuned hard: `lto = "fat"`, `codegen-units = 1`,
       burn, blur/sharpen/smudge, type, pen
 - [ ] Selection ops — expand/contract, feather, inverse, transform
 - [ ] Filters — gaussian/box/motion blur, unsharp, liquify, neural upscale
+- [ ] PSD / PSB read-write
 - [ ] Actions / scripting layer (Photoshop-compatible command names)
 
 ---

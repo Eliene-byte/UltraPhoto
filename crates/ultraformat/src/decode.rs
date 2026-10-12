@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use image::{ImageReader, ImageFormat as ImgFormat};
+use image::{ImageFormat as ImgFormat, ImageReader};
 use thiserror::Error;
 
 use crate::metadata::{FileFormat, ImageMetadata};
@@ -88,7 +88,9 @@ fn load_from_bytes_with(bytes: &[u8], opts: &LoadOptions) -> Result<LoadedImage,
     let reader = ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
         .map_err(|e| LoadError::Decode(e.to_string()))?;
-    let img = reader.decode().map_err(|e| LoadError::Decode(e.to_string()))?;
+    let img = reader
+        .decode()
+        .map_err(|e| LoadError::Decode(e.to_string()))?;
 
     let (width, height) = (img.width() as usize, img.height() as usize);
     if width.saturating_mul(height) > MAX_PIXELS {
@@ -100,7 +102,9 @@ fn load_from_bytes_with(bytes: &[u8], opts: &LoadOptions) -> Result<LoadedImage,
     // through the path that preserves depth.
     let declared_depth = probe_depth(bytes, format);
     let high_precision = declared_depth == Depth::U16 || declared_depth == Depth::F32;
-    let depth = opts.force_depth.unwrap_or_else(|| depth_for(high_precision));
+    let depth = opts
+        .force_depth
+        .unwrap_or_else(|| depth_for(high_precision));
 
     let has_alpha = img.color().has_alpha();
     let is_gray = matches!(img.color(), image::ColorType::L8 | image::ColorType::La8);

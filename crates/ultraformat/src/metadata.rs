@@ -64,7 +64,11 @@ impl FileFormat {
     pub const fn supports_alpha(self) -> bool {
         matches!(
             self,
-            FileFormat::Png | FileFormat::Tiff | FileFormat::WebP | FileFormat::Psd | FileFormat::Exr
+            FileFormat::Png
+                | FileFormat::Tiff
+                | FileFormat::WebP
+                | FileFormat::Psd
+                | FileFormat::Exr
         )
     }
 }

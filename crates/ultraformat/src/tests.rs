@@ -122,7 +122,9 @@ fn decoding_is_detected_by_magic_not_extension() {
     // A JPEG that is lying about being a PNG.
     let jpeg = save_to_vec(&src, None, FileFormat::Jpeg, &opts).unwrap();
     assert_eq!(sniff_format(&jpeg), Some(FileFormat::Jpeg));
-    let meta = load_from_bytes(&jpeg, &LoadOptions::default()).unwrap().metadata;
+    let meta = load_from_bytes(&jpeg, &LoadOptions::default())
+        .unwrap()
+        .metadata;
     assert_eq!(meta.format, Some(FileFormat::Jpeg));
 }
 
@@ -139,12 +141,11 @@ fn a_truncated_png_is_rejected_not_silently_short() {
     let bytes = save_to_vec(&src, None, FileFormat::Png, &SaveOptions::default()).unwrap();
     let truncated = &bytes[..bytes.len() / 3];
     // Must either error or return fewer rows — never claim a full image.
-    match load_from_bytes(truncated, &LoadOptions::default()) {
-        Ok(img) => assert!(
+    if let Ok(img) = load_from_bytes(truncated, &LoadOptions::default()) {
+        assert!(
             img.surface.height() < src.height(),
             "truncated file decoded as a full-size image"
-        ),
-        Err(_) => {}
+        );
     }
 }
 

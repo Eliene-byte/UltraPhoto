@@ -1,4 +1,4 @@
-﻿//! # ultraformat
+//! # ultraformat
 //!
 //! Reading and writing image files into and out of [`ultrapixel::Surface`].
 //!
@@ -108,7 +108,6 @@ pub(crate) fn from_rgba8(
         out.plane_mut(3).write_rect(r, &buf_a);
     }
 }
-
 
 /// Builds a surface with the right format for a decoded file.
 pub(crate) fn make_surface(width: usize, height: usize, depth: Depth, with_alpha: bool) -> Surface {
